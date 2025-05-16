@@ -36,7 +36,7 @@ export default class ReportDetailPresenter {
       const report = await reportMapper(response.data);
       console.log(report);
 
-      this.#view.populateReportDetailAndInitialMap(response.message, response.data);
+      this.#view.populateReportDetailAndInitialMap(response.message, report);
     } catch (error) {
       console.error('showReportDetailAndMap: error:', error);
       this.#view.populateReportDetailError(error.message);
