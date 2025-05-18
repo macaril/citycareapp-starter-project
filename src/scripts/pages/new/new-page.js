@@ -128,7 +128,7 @@ export default class NewPage {
                 </div>
                 <div class="new-form__location__lat-lng">
                   <input type="number" name="latitude" value="-6.175389" disabled>
-                  <input type="number" name="longitude" value="106.827139" >
+                  <input type="number" name="longitude" value="106.827139" disabled >
                 </div>
               </div>
             </div>

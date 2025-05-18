@@ -2,11 +2,14 @@ import { getActiveRoute } from '../routes/url-parser';
 import {
   generateAuthenticatedNavigationListTemplate,
   generateMainNavigationListTemplate,
+  generateSubscribeButtonTemplate,
   generateUnauthenticatedNavigationListTemplate,
+  generateUnsubscribeButtonTemplate,
 } from '../templates';
-import { setupSkipToContent, transitionHelper } from '../utils';
+import { setupSkipToContent, transitionHelper, isServiceWorkerAvailable, } from '../utils';
 import { getAccessToken, getLogout } from '../utils/auth';
 import { routes } from '../routes/routes';
+import { isCurrentPushSubscriptionAvailable, subscribe, unsubscribe } from '../utils/notification-helper';
 
 export default class App {
   #content;
@@ -77,6 +80,30 @@ export default class App {
     });
   }
 
+  async #setupPushNotification() {
+    const pushNotificationTools = document.getElementById('push-notification-tools');
+    const isSubscribed = await isCurrentPushSubscriptionAvailable();
+
+    if (isSubscribed){
+      pushNotificationTools.innerHTML = generateUnsubscribeButtonTemplate();
+      document.getElementById('unsubscribe-button').addEventListener('click', () => {
+        unsubscribe().finally(() => {
+          this.#setupPushNotification();
+        });
+      });
+
+      return;
+    }
+
+    pushNotificationTools.innerHTML = generateSubscribeButtonTemplate();
+    document.getElementById('subscribe-button').addEventListener('click', () => {
+      subscribe().finally(() => {
+        this.#setupPushNotification();
+      });
+      console.log('Trigger Button')
+    });
+  }
+
   async renderPage() {
     const url = getActiveRoute();
     const route = routes[url];
@@ -94,6 +121,10 @@ export default class App {
     transition.updateCallbackDone.then(() => {
       scrollTo({ top: 0, behavior: 'instant' });
       this.#setupNavigationList();
+
+      if (isServiceWorkerAvailable()) {
+        this.#setupPushNotification();
+      }
     });
     
   }
