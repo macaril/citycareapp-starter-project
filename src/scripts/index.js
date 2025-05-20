@@ -19,6 +19,8 @@ document.addEventListener('DOMContentLoaded', async () => {
   await app.renderPage();
   await registerServiceWorker();
 
+
+
   window.addEventListener('hashchange', async () => {
     await app.renderPage();
     Camera.stopAllStreams();
