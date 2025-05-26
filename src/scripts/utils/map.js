@@ -1,69 +1,54 @@
-import { map, tileLayer, Icon, marker, popup, icon, latLng } from 'leaflet';
-import markerIcon from 'leaflet/dist/images/marker-icon.png';
-import markerIcon2x from 'leaflet/dist/images/marker-icon-2x.png';
-import markerShadow from 'leaflet/dist/images/marker-shadow.png';
-import { MAP_SERVICE_API_KEY } from '../config';
+import { map as createMap, tileLayer, Icon, marker, popup, icon, latLng, control, layerGroup } from "leaflet";
+import markerIcon from "leaflet/dist/images/marker-icon.png";
+import markerIcon2x from "leaflet/dist/images/marker-icon-2x.png";
+import markerShadow from "leaflet/dist/images/marker-shadow.png";
 
 export default class Map {
   #zoom = 5;
   #map = null;
-
-  static async getPlaceNameByCoordinate(latitude, longitude) {
-    try {
-      const url = new URL(`https://api.maptiler.com/geocoding/${longitude},${latitude}.json`);
-      url.searchParams.set('key', MAP_SERVICE_API_KEY);
-      url.searchParams.set('language', 'id');
-      url.searchParams.set('limit', '1');
-
-      const response = await fetch(url);
-      const json = await response.json();
-
-      const place = json.features[0].place_name.split(', ');
-      return [place.at(-2), place.at(-1)].map((name) => name).join(', ');
-    } catch (error) {
-      console.error('getPlaceNameByCoordinate: error:', error);
-      return `${latitude}, ${longitude}`;
-    }
-  }
+  #baseLayers = {};
+  #overlays = {};
+  #layerControl = null;
+  
+  // MapTiler API key
+  #mapTilerKey = 'DgAqexwFefbHfJBEtOke';
 
   static isGeolocationAvailable() {
-    return 'geolocation' in navigator;
+    return "geolocation" in navigator;
   }
 
   static getCurrentPosition(options = {}) {
     return new Promise((resolve, reject) => {
       if (!Map.isGeolocationAvailable()) {
-        reject('Geolocation API unsupported');
+        reject("Geolocation API unsupported");
         return;
       }
 
-      navigator.geolocation.getCurrentPosition(resolve, reject, options);
+      navigator.geolocation.getCurrentPosition(resolve, reject);
     });
   }
 
-  /**
-   * Reference of using this static method:
-   * https://stackoverflow.com/questions/43431550/how-can-i-invoke-asynchronous-code-within-a-constructor
-   * */
   static async build(selector, options = {}) {
-    if ('center' in options && options.center) {
+    if ("center" in options && options.center) {
       return new Map(selector, options);
     }
 
     const jakartaCoordinate = [-6.2, 106.816666];
 
-    // Using Geolocation API
-    if ('locate' in options && options.locate) {
+    if ("locate" in options && options.locate) {
       try {
         const position = await Map.getCurrentPosition();
-        const coordinate = [position.coords.latitude, position.coords.longitude];
+        const coordinate = [
+          position.coords.latitude,
+          position.coords.longitude,
+        ];
 
         return new Map(selector, {
           ...options,
           center: coordinate,
         });
       } catch (error) {
-        console.error('build: error:', error);
+        console.error("build: error", error);
 
         return new Map(selector, {
           ...options,
@@ -80,24 +65,113 @@ export default class Map {
 
   constructor(selector, options = {}) {
     this.#zoom = options.zoom ?? this.#zoom;
+    
+    // Jika API key disediakan dalam options, gunakan itu
+    if (options.mapTilerKey) {
+      this.#mapTilerKey = options.mapTilerKey;
+    }
 
-    const tileOsm = tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
-      attribution:
-        '&copy; <a href="https://www.openstreetmap.org/copyright" target="_blank">OpenStreetMap</a>',
+    // Fallback ke OpenStreetMap jika tidak ada API key
+    const osmLayer = tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", {
+        attribution: '&copy; <a href="https://www.openstreetmap.org/copyright" target="_blank">OpenStreetMap</a>',
     });
-
-    this.#map = map(document.querySelector(selector), {
-      zoom: this.#zoom,
-      scrollWhelZoom: false,
-      layers: [tileOsm],
-      ...options,
+    
+    // Inisialisasi layer menggunakan MapTiler
+    const streetsLayer = this.#createMapTilerLayer('streets');
+    const satelliteLayer = this.#createMapTilerLayer('satellite');
+    const hybridLayer = this.#createMapTilerLayer('hybrid');
+    const basicLayer = this.#createMapTilerLayer('basic');
+    const tonerLayer = this.#createMapTilerLayer('toner');
+    const darkLayer = this.#createMapTilerLayer('dark');
+    
+    // Tentukan layer mana yang akan digunakan berdasarkan ketersediaan API key
+    const defaultLayer = this.#mapTilerKey ? streetsLayer : osmLayer;
+    
+    // Simpan base layers untuk layer control
+    this.#baseLayers = {
+      "Streets": streetsLayer,
+      "Satelit": satelliteLayer,
+      "Hybrid": hybridLayer,
+      "Basic": basicLayer,
+      "Toner": tonerLayer,
+      "Mode Gelap": darkLayer
+    };
+    
+    if (!this.#mapTilerKey) {
+      // Jika tidak ada API key, hanya tampilkan OpenStreetMap
+      this.#baseLayers = {
+        "OpenStreetMap": osmLayer
+      };
+    }
+    
+    // Initialize map dengan layer default
+    this.#map = createMap(document.querySelector(selector), {
+        zoom: this.#zoom,
+        scrollWheelZoom: true,
+        layers: [defaultLayer], 
+        ...options,
+    });
+    
+    // Tambahkan layer control
+    this.#layerControl = control.layers(this.#baseLayers, this.#overlays).addTo(this.#map);
+  }
+  
+  // Metode untuk membuat layer MapTiler
+  #createMapTilerLayer(style) {
+    // Penanganan khusus untuk satellite dan hybrid
+    if (style === 'satellite') {
+      return tileLayer(`https://api.maptiler.com/tiles/satellite/{z}/{x}/{y}.jpg?key=${this.#mapTilerKey}`, {
+        tileSize: 512,
+        zoomOffset: -1,
+        minZoom: 1,
+        attribution: '<a href="https://www.maptiler.com/copyright/" target="_blank">&copy; MapTiler</a>',
+        crossOrigin: true
+      });
+    }
+    
+    if (style === 'hybrid') {
+      // Membuat group layer untuk hybrid (satellite + labels)
+      const satelliteLayer = tileLayer(`https://api.maptiler.com/tiles/satellite/{z}/{x}/{y}.jpg?key=${this.#mapTilerKey}`, {
+        tileSize: 512,
+        zoomOffset: -1,
+        minZoom: 1
+      });
+      
+      const labelsLayer = tileLayer(`https://api.maptiler.com/maps/streets-v2/overlay/{z}/{x}/{y}.png?key=${this.#mapTilerKey}`, {
+        tileSize: 512,
+        zoomOffset: -1,
+        minZoom: 1,
+        attribution: '<a href="https://www.maptiler.com/copyright/" target="_blank">&copy; MapTiler</a> <a href="https://www.openstreetmap.org/copyright" target="_blank">&copy; OpenStreetMap contributors</a>'
+      });
+      
+      // Membuat group layer dengan Leaflet
+      const hybridLayerGroup = layerGroup([satelliteLayer, labelsLayer]);
+      return hybridLayerGroup;
+    }
+    
+    // Mapping style untuk style lainnya
+    const styleMap = {
+      'streets': 'streets-v2',
+      'basic': 'basic-v2',
+      'toner': 'toner-v2',
+      'dark': 'dark-v2'
+    };
+    
+    const actualStyle = styleMap[style] || style;
+    
+    return tileLayer(`https://api.maptiler.com/maps/${actualStyle}/{z}/{x}/{y}.png?key=${this.#mapTilerKey}`, {
+      tileSize: 512,
+      zoomOffset: -1,
+      minZoom: 1,
+      attribution: '<a href="https://www.maptiler.com/copyright/" target="_blank">&copy; MapTiler</a> <a href="https://www.openstreetmap.org/copyright" target="_blank">&copy; OpenStreetMap contributors</a>',
+      crossOrigin: true
     });
   }
 
   changeCamera(coordinate, zoomLevel = null) {
     if (!zoomLevel) {
-      this.#map.setView(latLng(coordinate), this.#zoom);
-      return;
+        this.#map.setView(latLng(coordinate), this.#zoom);
+        return;
     }
 
     this.#map.setView(latLng(coordinate), zoomLevel);
@@ -106,42 +180,44 @@ export default class Map {
   getCenter() {
     const { lat, lng } = this.#map.getCenter();
     return {
-      latitude: lat,
-      longitude: lng,
+        latitude: lat,
+        longitude: lng,
     };
   }
 
   createIcon(options = {}) {
     return icon({
-      ...Icon.Default.prototype.options,
-      iconRetinaUrl: markerIcon2x,
-      iconUrl: markerIcon,
-      shadowUrl: markerShadow,
-      ...options,
+        ...Icon.Default.prototype.options,
+        iconRetinaUrl: markerIcon2x,
+        iconUrl: markerIcon,
+        shadowUrl: markerShadow,
+        ...options,
     });
   }
 
   addMarker(coordinates, markerOptions = {}, popupOptions = null) {
     if (typeof markerOptions !== 'object') {
-      throw new Error('markerOptions must be an object');
+        throw new Error('markerOptions must be an object');
     }
 
     const newMarker = marker(coordinates, {
-      icon: this.createIcon(),
-      ...markerOptions,
+        icon: this.createIcon(),
+        ...markerOptions,
     });
 
     if (popupOptions) {
-      if (typeof popupOptions !== 'object') {
-        throw new Error('popupOptions must be an object');
-      }
+        if (typeof popupOptions !== 'object') {
+            throw new Error('popupOptions must be an object');
+        }
 
-      if (!('content' in popupOptions)) {
-        throw new Error('popupOptions must include `content` property.');
-      }
+        if (!('content' in popupOptions)) {
+            throw new Error('popupOptions must include `content` property');
+        }
 
-      const newPopup = popup(coordinates, popupOptions);
-      newMarker.bindPopup(newPopup);
+        const newPopup = popup({
+            content: popupOptions.content
+        });
+        newMarker.bindPopup(newPopup);
     }
 
     newMarker.addTo(this.#map);
@@ -149,7 +225,24 @@ export default class Map {
     return newMarker;
   }
 
+  // Metode untuk menambahkan overlay layer
+  addOverlayLayer(name, layer) {
+    this.#overlays[name] = layer;
+    this.#layerControl.addOverlay(layer, name);
+    return layer;
+  }
+
+  // Metode untuk menghapus overlay layer
+  removeOverlayLayer(name) {
+    if (this.#overlays[name]) {
+      this.#map.removeLayer(this.#overlays[name]);
+      delete this.#overlays[name];
+      this.#layerControl.remove();
+      this.#layerControl = control.layers(this.#baseLayers, this.#overlays).addTo(this.#map);
+    }
+  }
+
   addMapEventListener(eventName, callback) {
-    this.#map.addEventListener(eventName, callback);
+    this.#map.on(eventName, callback);
   }
 }

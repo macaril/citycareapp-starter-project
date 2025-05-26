@@ -4,11 +4,13 @@ export default class ReportDetailPresenter {
   #reportId;
   #view;
   #apiModel;
+  #dbModel;
 
-  constructor(reportId, { view, apiModel }) {
+  constructor(reportId, { view, apiModel, dbModel }) {
     this.#reportId = reportId;
     this.#view = view;
     this.#apiModel = apiModel;
+    this.#dbModel = dbModel;
   }
 
   async showReportDetailMap() {
@@ -112,8 +114,31 @@ export default class ReportDetailPresenter {
     }
   }
 
-  showSaveButton() {
-    if (this.#isReportSaved()) {
+  async saveReport() {
+    try {
+      const report = await this.#apiModel.getReportById(this.#reportId);
+      await this.#dbModel.putReport(report.data);
+
+      this.#view.saveToBookmarkSuccessfully('Success to save to bookmark');
+    } catch (error) {
+      console.error('saveReport: error:', error);
+      this.#view.saveToBookmarkFailed(error.message);
+    }
+  }
+
+  async removeReport() {
+    try {
+      await this.#dbModel.removeReport(this.#reportId);
+
+      this.#view.removeFromBookmarkSuccessfully('Success to remove from bookmark');
+    } catch {
+      console.error('removeReport: error:', error);
+      this.#view.removeFromBookmarkFailed(error.message);
+    }
+  }
+
+  async showSaveButton() {
+    if (await this.#isReportSaved()) { 
       this.#view.renderRemoveButton();
       return;
     }
@@ -121,7 +146,7 @@ export default class ReportDetailPresenter {
     this.#view.renderSaveButton();
   }
 
-  #isReportSaved() {
-    return false;
+  async #isReportSaved() {
+    return !!(await this.#dbModel.getReportById(this.#reportId));
   }
 }
